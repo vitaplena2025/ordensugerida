@@ -19,8 +19,9 @@ lead_time = st.sidebar.number_input(
 coverage_days = st.sidebar.number_input(
     "Días de Cobertura Adicional", min_value=0, value=0, step=1
 )
+# Rango de Pedido define el número de meses para considerar la demanda total
 order_horizon_months = st.sidebar.number_input(
-    "Horizonte de pedido (meses)", min_value=1, value=3, step=1
+    "Rango de Pedido (meses)", min_value=1, value=3, step=1
 )
 order_horizon_days = order_horizon_months * 30
 
@@ -70,7 +71,7 @@ if uploaded_file:
 
     if st.button("Calcular Orden Sugerida 🧮"):
         df_calc = edited_df.copy()
-        # Cálculo de cantidad requerida usando días de safety stock
+        # Cálculo de cantidad requerida usando días de safety stock y rango de pedido
         df_calc["qty_needed"] = (
             df_calc["Venta diaria promedio"] * (lead_time + coverage_days + order_horizon_days)
             + df_calc["Venta diaria promedio"] * df_calc["Días de Safety Stock"]
