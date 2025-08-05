@@ -85,38 +85,32 @@ if uploaded_file:
             lambda r: apply_moq(r["qty_needed"], r["Mínimo de Orden por SKU"]), axis=1
         )
 
-        # Prorrateo para cumplir MOQ global exacto sin gran sobrepaso
+        # Ajuste para cumplir MOQ global (tope o mínimo)
         total = df_calc["Orden Sugerida en Bultos"].sum()
-        if 0 < total < min_order_global:
-            factor = min_order_global / total
-            # cálculo bruto
-            df_calc["raw_order"] = df_calc["Orden Sugerida en Bultos"] * factor
-            # piso al múltiplo de cada MOQ
-            df_calc["prorated"] = df_calc.apply(
-                lambda r: int(np.floor(r["raw_order"] / r["Mínimo de Orden por SKU"])) * r["Mínimo de Orden por SKU"],
-                axis=1
-            )
-            total_floor = df_calc["prorated"].sum()
-            leftover = min_order_global - total_floor
-            # calcula fracción para priorizar
-            df_calc["fraction"] = df_calc.apply(
-                lambda r: (r["raw_order"] / r["Mínimo de Orden por SKU"]) - np.floor(r["raw_order"] / r["Mínimo de Orden por SKU"]),
-                axis=1
-            )
-            # repartir sobras por mayor fracción
-            df_frac = df_calc.sort_values("fraction", ascending=False)
-            for idx, row in df_frac.iterrows():
-                if leftover <= 0:
-                    break
-                moq = row["Mínimo de Orden por SKU"]
-                df_calc.at[idx, "prorated"] += moq
-                leftover -= moq
-            # asignar prorrateado final
-            df_calc["Orden Sugerida en Bultos"] = df_calc["prorated"]
-            # limpieza columnas temporales
-            df_calc = df_calc.drop(columns=["raw_order", "prorated", "fraction"])
+        if min_order_global > 0:
+            if total < min_order_global:
+                # Si el total es menor, prorrateamos hacia arriba (ceil) para alcanzar mínimo
+                factor = min_order_global / total
+                df_calc["raw_order"] = df_calc["Orden Sugerida en Bultos"] * factor
+                df_calc["prorated"] = df_calc.apply(
+                    lambda r: int(np.ceil(r["raw_order"] / r["Mínimo de Orden por SKU"])) * r["Mínimo de Orden por SKU"],
+                    axis=1
+                )
+                df_calc["Orden Sugerida en Bultos"] = df_calc["prorated"]
+            elif total > min_order_global:
+                # Si el total excede, prorrateamos hacia abajo (floor) para no superar el tope
+                factor = min_order_global / total
+                df_calc["raw_order"] = df_calc["Orden Sugerida en Bultos"] * factor
+                df_calc["prorated"] = df_calc.apply(
+                    lambda r: (int(np.floor(r["raw_order"] / r["Mínimo de Orden por SKU"]))
+                               * r["Mínimo de Orden por SKU"]),
+                    axis=1
+                )
+                df_calc["Orden Sugerida en Bultos"] = df_calc["prorated"]
+            # Limpiar columnas temporales
+            df_calc = df_calc.drop(columns=["raw_order", "prorated"])
 
-        # Mostrar resultados
+        # Mostrar resultados finales
         st.subheader("✅ Orden Sugerida por SKU")
         st.dataframe(df_calc[["SKU", "Orden Sugerida en Bultos"]])
 
