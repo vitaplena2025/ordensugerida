@@ -19,10 +19,30 @@ coverage_days = st.sidebar.number_input(
     "Días de Cobertura Adicional", min_value=0, value=0, step=1
 )
 
+# ----- Template CSV -----
+st.sidebar.header("Template CSV de Ejemplo")
+# DataFrame vacío con columnas requeridas
+template_df = pd.DataFrame(
+    columns=[
+        "SKU", 
+        "Venta diaria promedio", 
+        "Inventario On Hand", 
+        "safety_stock", 
+        "Mínimo de orden por SKU"
+    ]
+)
+csv_template = template_df.to_csv(index=False)
+st.sidebar.download_button(
+    label="Descargar template CSV",
+    data=csv_template,
+    file_name="template_orden_sugerida.csv",
+    mime="text/csv"
+)
+
 # ----- Carga de Datos -----
 st.sidebar.header("Historial de Ventas y Parámetros por SKU")
 uploaded_file = st.sidebar.file_uploader(
-    "Sube un CSV con columnas: SKU, avg_daily_sales, inventory_current, safety_stock, moq_sku",
+    "Sube un CSV con columnas: SKU, Venta diaria promedio, Inventario On Hand, safety_stock, Mínimo de orden por SKU",
     type=["csv"]
 )
 
@@ -40,9 +60,9 @@ if uploaded_file:
         df_calc = edited_df.copy()
         # Cálculo de cantidad requerida
         df_calc["qty_needed"] = (
-            df_calc["avg_daily_sales"] * (lead_time + coverage_days)
+            df_calc["Venta diaria promedio"] * (lead_time + coverage_days)
             + df_calc["safety_stock"]
-            - df_calc["inventory_current"]
+            - df_calc["Inventario On Hand"]
         )
         df_calc["qty_needed"] = df_calc["qty_needed"].clip(lower=0)
 
@@ -51,7 +71,7 @@ if uploaded_file:
             return 0 if x <= 0 else int(np.ceil(x / moq) * moq)
 
         df_calc["suggested_order"] = df_calc.apply(
-            lambda r: apply_moq(r["qty_needed"], r["moq_sku"]), axis=1
+            lambda r: apply_moq(r["qty_needed"], r["Mínimo de orden por SKU"]), axis=1
         )
 
         # Ajuste para MOQ Global (si aplica)
