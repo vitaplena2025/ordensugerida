@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import io
 
 # Configuración de la página
 st.set_page_config(page_title="Orden Sugerida de Compra", layout="wide")
@@ -85,16 +86,34 @@ if uploaded_file:
             lambda r: apply_moq(r["qty_needed"], r["Mínimo de Orden por SKU"]), axis=1
         )
 
+        # Renombrar para salida
+        df_out = df_calc[["SKU", "suggested_order"]].rename(
+            columns={"suggested_order": "Orden Sugerida en Bultos"}
+        )
+
         # Ajuste para MOQ Global (si aplica)
-        total_order = df_calc["suggested_order"].sum()
+        total_order = df_out["Orden Sugerida en Bultos"].sum()
         if 0 < total_order < min_order_global:
             factor = min_order_global / total_order
-            df_calc["suggested_order"] = df_calc["suggested_order"].apply(
+            df_out["Orden Sugerida en Bultos"] = df_out["Orden Sugerida en Bultos"].apply(
                 lambda x: int(np.ceil(x * factor))
             )
 
         # Mostrar resultados finales
         st.subheader("✅ Orden Sugerida por SKU")
-        st.dataframe(df_calc[["SKU", "suggested_order"]])
+        st.dataframe(df_out)
+
+        # Botón para descargar Excel
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            df_out.to_excel(writer, index=False, sheet_name="Orden Sugerida")
+            writer.save()
+        buffer.seek(0)
+        st.download_button(
+            label="Descargar Orden Sugerida (Excel)",
+            data=buffer,
+            file_name="orden_sugerida.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 else:
     st.info("Por favor, sube un archivo CSV con las columnas requeridas para generar la orden.")
