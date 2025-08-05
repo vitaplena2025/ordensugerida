@@ -115,7 +115,7 @@ if uploaded_file:
 
         # Botón para descargar Excel
         buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
             df_out.to_excel(writer, index=False, sheet_name="Orden Sugerida")
             writer.save()
         buffer.seek(0)
