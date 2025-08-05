@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import io
+import itertools
 
 # Configuración de la página
 st.set_page_config(page_title="Orden Sugerida de Compra", layout="wide")
@@ -19,10 +19,12 @@ lead_time = st.sidebar.number_input(
 coverage_days = st.sidebar.number_input(
     "Días de Cobertura Adicional", min_value=0, value=0, step=1
 )
+# Rango de Pedido define el número de meses para considerar la demanda total
 order_horizon_months = st.sidebar.number_input(
     "Rango de Pedido (meses)", min_value=1, value=3, step=1
 )
 order_horizon_days = order_horizon_months * 30
+# Duración del periodo de ventas para calcular promedio diario
 duration_sales_period = st.sidebar.number_input(
     "Duración del período de ventas (días)", min_value=1, value=30, step=1
 )
@@ -56,7 +58,7 @@ uploaded_file = st.sidebar.file_uploader(
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     st.subheader("📊 Datos de Entrada")
-    # Editor de datos (Streamlit >=1.23 fallback a experimental)
+    # Editor de datos para Streamlit >= 1.23
     try:
         edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
     except AttributeError:
@@ -71,13 +73,13 @@ if uploaded_file:
         total_days = lead_time + coverage_days + order_horizon_days
         # Calcula cantidad base
         df_calc["qty_needed"] = np.maximum(
-            df_calc["Venta diaria promedio"] * total_days 
+            df_calc["Venta diaria promedio"] * total_days
             + df_calc["Venta diaria promedio"] * df_calc["Días de Safety Stock"]
             - df_calc["Inventario On Hand"],
             0
         )
 
-        # Ajustar por MOQ de SKU
+        # Ajustar por MOQ de SKU (multiplo más cercano por encima)
         def apply_moq(units, moq):
             return 0 if units <= 0 else int(np.ceil(units / moq) * moq)
 
@@ -85,30 +87,18 @@ if uploaded_file:
             lambda r: apply_moq(r["qty_needed"], r["Mínimo de Orden por SKU"]), axis=1
         )
 
-        # Ajuste para cumplir MOQ global (tope o mínimo)
+        # Ajustar para cumplir MOQ global en bultos
         total = df_calc["Orden Sugerida en Bultos"].sum()
-        if min_order_global > 0:
-            if total < min_order_global:
-                # Si el total es menor, prorrateamos hacia arriba (ceil) para alcanzar mínimo
-                factor = min_order_global / total
-                df_calc["raw_order"] = df_calc["Orden Sugerida en Bultos"] * factor
-                df_calc["prorated"] = df_calc.apply(
-                    lambda r: int(np.ceil(r["raw_order"] / r["Mínimo de Orden por SKU"])) * r["Mínimo de Orden por SKU"],
-                    axis=1
-                )
-                df_calc["Orden Sugerida en Bultos"] = df_calc["prorated"]
-            elif total > min_order_global:
-                # Si el total excede, prorrateamos hacia abajo (floor) para no superar el tope
-                factor = min_order_global / total
-                df_calc["raw_order"] = df_calc["Orden Sugerida en Bultos"] * factor
-                df_calc["prorated"] = df_calc.apply(
-                    lambda r: (int(np.floor(r["raw_order"] / r["Mínimo de Orden por SKU"]))
-                               * r["Mínimo de Orden por SKU"]),
-                    axis=1
-                )
-                df_calc["Orden Sugerida en Bultos"] = df_calc["prorated"]
-            # Limpiar columnas temporales
-            df_calc = df_calc.drop(columns=["raw_order", "prorated"])
+        if min_order_global > 0 and total < min_order_global:
+            diff = min_order_global - total
+            # Distribuir faltante por prioridad de demanda
+            sku_order = df_calc.sort_values("qty_needed", ascending=False).index.tolist()
+            cyc = itertools.cycle(sku_order)
+            while diff > 0:
+                idx = next(cyc)
+                moq = df_calc.at[idx, "Mínimo de Orden por SKU"]
+                df_calc.at[idx, "Orden Sugerida en Bultos"] += moq
+                diff -= moq
 
         # Mostrar resultados finales
         st.subheader("✅ Orden Sugerida por SKU")
@@ -123,4 +113,4 @@ if uploaded_file:
             mime="text/csv"
         )
 else:
-    st.info("Por favor, sube un CSV con las columnas requeridas para generar la orden.")
+    st.info("Por favor, sube un archivo CSV con las columnas requeridas para generar la orden.")
