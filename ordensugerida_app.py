@@ -11,7 +11,7 @@ st.title("🛒 Generador de Orden Sugerida")
 # ----- Parámetros Globales -----
 st.sidebar.header("Parámetros Globales de la Orden")
 min_order_global = st.sidebar.number_input(
-    "MOQ Global de la Orden", min_value=0, value=0, step=1
+    "MOQ Global de la Orden (bultos)", min_value=0, value=0, step=1
 )
 lead_time = st.sidebar.number_input(
     "Lead time (días)", min_value=0, value=0, step=1
@@ -24,13 +24,17 @@ order_horizon_months = st.sidebar.number_input(
     "Rango de Pedido (meses)", min_value=1, value=3, step=1
 )
 order_horizon_days = order_horizon_months * 30
+# Duración del periodo de ventas para calcular promedio diario
+duration_sales_period = st.sidebar.number_input(
+    "Duración del período de ventas (días)", min_value=1, value=30, step=1
+)
 
 # ----- Template CSV -----
 st.sidebar.header("Template CSV de Ejemplo")
 template_df = pd.DataFrame(
     columns=[
         "SKU",
-        "Venta diaria promedio",
+        "Venta total periodo",
         "Inventario On Hand",
         "Días de Safety Stock",
         "Mínimo de Orden por SKU",
@@ -47,7 +51,7 @@ st.sidebar.download_button(
 # ----- Carga de Datos -----
 st.sidebar.header("Historial de Ventas y Parámetros por SKU")
 uploaded_file = st.sidebar.file_uploader(
-    "Sube un CSV con columnas: SKU, Venta diaria promedio, Inventario On Hand, Días de Safety Stock, Mínimo de Orden por SKU",
+    "Sube un CSV con columnas: SKU, Venta total periodo, Inventario On Hand, Días de Safety Stock, Mínimo de Orden por SKU",
     type=["csv"]
 )
 
@@ -71,9 +75,14 @@ if uploaded_file:
 
     if st.button("Calcular Orden Sugerida 🧮"):
         df_calc = edited_df.copy()
-        # Cálculo de cantidad requerida usando días de safety stock y rango de pedido
+        # Calcular venta diaria promedio a partir de venta total del periodo
+        df_calc["Venta diaria promedio"] = (
+            df_calc["Venta total periodo"] / duration_sales_period
+        )
+        # Cálculo de cantidad requerida usando promedio diario, safety stock en días y rango de pedido
+        total_days = lead_time + coverage_days + order_horizon_days
         df_calc["qty_needed"] = (
-            df_calc["Venta diaria promedio"] * (lead_time + coverage_days + order_horizon_days)
+            df_calc["Venta diaria promedio"] * total_days
             + df_calc["Venta diaria promedio"] * df_calc["Días de Safety Stock"]
             - df_calc["Inventario On Hand"]
         )
