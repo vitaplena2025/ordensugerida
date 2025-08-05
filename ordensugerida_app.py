@@ -52,11 +52,20 @@ uploaded_file = st.sidebar.file_uploader(
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     st.subheader("📊 Datos de Entrada")
-    edited_df = st.experimental_data_editor(
-        df,
-        num_rows="dynamic",
-        use_container_width=True
-    )
+    # Editor de datos para Streamlit >= 1.23
+    try:
+        edited_df = st.data_editor(
+            df,
+            num_rows="dynamic",
+            use_container_width=True
+        )
+    except AttributeError:
+        # Compatibilidad con versiones anteriores
+        edited_df = st.experimental_data_editor(
+            df,
+            num_rows="dynamic",
+            use_container_width=True
+        )
 
     if st.button("Calcular Orden Sugerida 🧮"):
         df_calc = edited_df.copy()
