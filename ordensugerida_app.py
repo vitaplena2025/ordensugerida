@@ -18,17 +18,20 @@ lead_time = st.sidebar.number_input(
 coverage_days = st.sidebar.number_input(
     "Días de Cobertura Adicional", min_value=0, value=0, step=1
 )
+order_horizon_months = st.sidebar.number_input(
+    "Horizonte de pedido (meses)", min_value=1, value=3, step=1
+)
+order_horizon_days = order_horizon_months * 30
 
 # ----- Template CSV -----
 st.sidebar.header("Template CSV de Ejemplo")
-# DataFrame vacío con columnas requeridas
 template_df = pd.DataFrame(
     columns=[
-        "SKU", 
-        "Venta diaria promedio", 
-        "Inventario On Hand", 
-        "safety_stock", 
-        "Mínimo de orden por SKU"
+        "SKU",
+        "Venta diaria promedio",
+        "Inventario On Hand",
+        "safety_stock",
+        "Mínimo de orden por SKU",
     ]
 )
 csv_template = template_df.to_csv(index=False)
@@ -49,7 +52,6 @@ uploaded_file = st.sidebar.file_uploader(
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     st.subheader("📊 Datos de Entrada")
-    # Permite edición en línea (agregar/modificar filas y valores)
     edited_df = st.experimental_data_editor(
         df,
         num_rows="dynamic",
@@ -60,7 +62,7 @@ if uploaded_file:
         df_calc = edited_df.copy()
         # Cálculo de cantidad requerida
         df_calc["qty_needed"] = (
-            df_calc["Venta diaria promedio"] * (lead_time + coverage_days)
+            df_calc["Venta diaria promedio"] * (lead_time + coverage_days + order_horizon_days)
             + df_calc["safety_stock"]
             - df_calc["Inventario On Hand"]
         )
@@ -78,9 +80,8 @@ if uploaded_file:
         total_order = df_calc["suggested_order"].sum()
         if 0 < total_order < min_order_global:
             factor = min_order_global / total_order
-            df_calc["suggested_order"] = (
-                df_calc["suggested_order"]
-                .apply(lambda x: int(np.ceil(x * factor)))
+            df_calc["suggested_order"] = df_calc["suggested_order"].apply(
+                lambda x: int(np.ceil(x * factor))
             )
 
         # Mostrar resultados finales
