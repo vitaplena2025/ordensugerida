@@ -25,6 +25,10 @@ order_horizon_days = order_horizon_months * 30
 duration_sales_period = st.sidebar.number_input(
     "Duración del período de ventas (días)", min_value=1, value=30, step=1
 )
+# Forzar pedido mínimo por SKU si hay demanda
+force_min_sku = st.sidebar.checkbox(
+    "Forzar pedido mínimo por SKU si hay demanda", value=False
+)
 
 # ----- Template CSV -----
 st.sidebar.header("Template CSV de Ejemplo")
@@ -59,7 +63,7 @@ if uploaded_file:
     except Exception:
         uploaded_file.seek(0)
         df = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='latin1')
-    # Normalizar nombres de columnas
+    # Normalizar y renombrar columnas comunes
     df.columns = df.columns.str.strip()
     df.rename(columns={
         'Dias de Safety Stock': 'Días de Safety Stock',
@@ -67,26 +71,16 @@ if uploaded_file:
     }, inplace=True)
 
     st.subheader("📊 Datos de Entrada")
-    # Editor de datos para Streamlit >= 1.23
+    # Editor de datos para ajustes manuales antes del cálculo
     try:
-        edited_df = st.data_editor(
-            df,
-            num_rows="dynamic",
-            use_container_width=True
-        )
+        edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
     except AttributeError:
-        edited_df = st.experimental_data_editor(
-            df,
-            num_rows="dynamic",
-            use_container_width=True
-        )
+        edited_df = st.experimental_data_editor(df, num_rows="dynamic", use_container_width=True)
 
     if st.button("Calcular Orden Sugerida 🧮"):
         df_calc = edited_df.copy()
         # Calcular venta diaria promedio
-        df_calc["Venta diaria promedio"] = (
-            df_calc["Venta total periodo"] / duration_sales_period
-        )
+        df_calc["Venta diaria promedio"] = df_calc["Venta total periodo"] / duration_sales_period
         # Días totales considerados
         total_days = lead_time + coverage_days + order_horizon_days
         # Demanda bruta con safety stock en días
@@ -96,20 +90,14 @@ if uploaded_file:
             - df_calc["Inventario On Hand"],
             0
         )
-        # Función de ceil a múltiplos de MOQ_SKU
+        # Funciones de floor y ceil a múltiplos de MOQ_SKU
+        def floor_moq(units, moq):
+            return 0 if units <= 0 else int((units // moq) * moq)
         def ceil_moq(units, moq):
             return 0 if units <= 0 else int(np.ceil(units / moq) * moq)
-
-        # Calcular floor y ceil por SKU
-        df_calc["floor"] = df_calc.apply(
-            lambda r: int((r["qty_needed"] // r["Mínimo de Orden por SKU"]) * r["Mínimo de Orden por SKU"]),
-            axis=1
-        )
-        df_calc["ceil"] = df_calc.apply(
-            lambda r: ceil_moq(r["qty_needed"], r["Mínimo de Orden por SKU"]),
-            axis=1
-        )
-
+        # Calcular floor y ceil
+        df_calc["floor"] = df_calc.apply(lambda r: floor_moq(r["qty_needed"], r["Mínimo de Orden por SKU"]), axis=1)
+        df_calc["ceil"] = df_calc.apply(lambda r: ceil_moq(r["qty_needed"], r["Mínimo de Orden por SKU"]), axis=1)
         # Subset-sum DP para cumplir MOQ global con mínimo overshoot
         if min_order_global > 0:
             floor_sum = int(df_calc["floor"].sum())
@@ -130,20 +118,34 @@ if uploaded_file:
                 if candidates:
                     best = min(candidates)
                     pick = dp[best]
-                    df_calc["Orden Sugerida en Bultos"] = [
-                        int(df_calc.at[i, "ceil"]) if i in pick else int(df_calc.at[i, "floor"]
-                    ) for i in range(len(df_calc))]
+                    orders = [int(df_calc.at[i, "ceil"]) if i in pick else int(df_calc.at[i, "floor"]) for i in range(len(df_calc))]
                 else:
-                    df_calc["Orden Sugerida en Bultos"] = df_calc["ceil"].astype(int)
+                    orders = df_calc["ceil"].astype(int).tolist()
+                df_calc["Orden Sugerida en Bultos"] = orders
         else:
             df_calc["Orden Sugerida en Bultos"] = df_calc["ceil"].astype(int)
-
-        # Mostrar resultados
-        st.subheader("✅ Orden Sugerida por SKU")
-        st.dataframe(df_calc[["SKU", "Orden Sugerida en Bultos"]])
-
-        # Descargar CSV de salida
-        csv_out = df_calc[["SKU", "Orden Sugerida en Bultos"]].to_csv(index=False)
+        # Forzar mínimo por SKU si se activa
+        if force_min_sku:
+            df_calc["Orden Sugerida en Bultos"] = df_calc.apply(
+                lambda r: r["ceil"] if (r["qty_needed"] > 0 and r["floor"] == 0) else r["Orden Sugerida en Bultos"],
+                axis=1
+            )
+        # Mostrar resultados en tabla editable para ajuste manual
+        st.subheader("✅ Orden Sugerida por SKU (editable)")
+        try:
+            final_df = st.data_editor(
+                df_calc[["SKU", "Orden Sugerida en Bultos"]],
+                num_rows="fixed",
+                use_container_width=True
+            )
+        except AttributeError:
+            final_df = st.experimental_data_editor(
+                df_calc[["SKU", "Orden Sugerida en Bultos"]],
+                num_rows="fixed",
+                use_container_width=True
+            )
+        # Botón de descarga CSV de la tabla final
+        csv_out = final_df.to_csv(index=False)
         st.download_button(
             label="Descargar Orden Sugerida (CSV)",
             data=csv_out,
