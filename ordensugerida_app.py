@@ -53,7 +53,22 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 if uploaded_file:
+    # Leer CSV con manejo de encoding y separador
     try:
+        df = pd.read_csv(uploaded_file)
+    except Exception:
+        uploaded_file.seek(0)
+        df = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='latin1')
+    # Normalizar nombres de columnas (strip y variantes sin acentos)
+    df.columns = df.columns.str.strip()
+    rename_map = {}
+    if 'Dias de Safety Stock' in df.columns:
+        rename_map['Dias de Safety Stock'] = 'Días de Safety Stock'
+    if 'Minimo de Orden por SKU' in df.columns:
+        rename_map['Minimo de Orden por SKU'] = 'Mínimo de Orden por SKU'
+    # Aplicar renombrado
+    if rename_map:
+        df.rename(columns=rename_map, inplace=True)
         # Intentar leer con configuración estándar
         df = pd.read_csv(uploaded_file)
     except Exception:
