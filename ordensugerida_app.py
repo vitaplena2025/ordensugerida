@@ -53,7 +53,13 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 if uploaded_file:
-    df = pd.read_csv(uploaded_file)
+    try:
+        # Intentar leer con configuración estándar
+        df = pd.read_csv(uploaded_file)
+    except Exception:
+        # Reintentar con detección de separador y encoding alternativo
+        uploaded_file.seek(0)
+        df = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='latin1')
     st.subheader("📊 Datos de Entrada")
     try:
         edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
