@@ -53,60 +53,64 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 if uploaded_file:
-    # Leer CSV con manejo de encoding y separador
+    # Lectura robusta del CSV
     try:
         df = pd.read_csv(uploaded_file)
     except Exception:
         uploaded_file.seek(0)
         df = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='latin1')
-    # Normalizar nombres de columnas (strip y variantes sin acentos)
+    # Normalizar nombres de columnas
     df.columns = df.columns.str.strip()
-    rename_map = {}
-    if 'Dias de Safety Stock' in df.columns:
-        rename_map['Dias de Safety Stock'] = 'Días de Safety Stock'
-    if 'Minimo de Orden por SKU' in df.columns:
-        rename_map['Minimo de Orden por SKU'] = 'Mínimo de Orden por SKU'
-    # Aplicar renombrado
-    if rename_map:
-        df.rename(columns=rename_map, inplace=True)
-        # Intentar leer con configuración estándar
-        df = pd.read_csv(uploaded_file)
-    except Exception:
-        # Reintentar con detección de separador y encoding alternativo
-        uploaded_file.seek(0)
-        df = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='latin1')
+    df.rename(columns={
+        'Dias de Safety Stock': 'Días de Safety Stock',
+        'Minimo de Orden por SKU': 'Mínimo de Orden por SKU'
+    }, inplace=True)
+
     st.subheader("📊 Datos de Entrada")
+    # Editor de datos para Streamlit >= 1.23
     try:
-        edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
+        edited_df = st.data_editor(
+            df,
+            num_rows="dynamic",
+            use_container_width=True
+        )
     except AttributeError:
-        edited_df = st.experimental_data_editor(df, num_rows="dynamic", use_container_width=True)
+        edited_df = st.experimental_data_editor(
+            df,
+            num_rows="dynamic",
+            use_container_width=True
+        )
 
     if st.button("Calcular Orden Sugerida 🧮"):
         df_calc = edited_df.copy()
         # Calcular venta diaria promedio
-        df_calc["Venta diaria promedio"] = df_calc["Venta total periodo"] / duration_sales_period
+        df_calc["Venta diaria promedio"] = (
+            df_calc["Venta total periodo"] / duration_sales_period
+        )
         # Días totales considerados
         total_days = lead_time + coverage_days + order_horizon_days
-        # Demanda bruta
+        # Demanda bruta con safety stock en días
         df_calc["qty_needed"] = np.maximum(
             df_calc["Venta diaria promedio"] * total_days
             + df_calc["Venta diaria promedio"] * df_calc["Días de Safety Stock"]
             - df_calc["Inventario On Hand"],
             0
         )
-        # Función de redondeo a múltiplos de MOQ_SKU (ceil)
-        def apply_moq(units, moq):
+        # Función de ceil a múltiplos de MOQ_SKU
+        def ceil_moq(units, moq):
             return 0 if units <= 0 else int(np.ceil(units / moq) * moq)
-        # Cálculo de floor y ceil por SKU
+
+        # Calcular floor y ceil por SKU
         df_calc["floor"] = df_calc.apply(
             lambda r: int((r["qty_needed"] // r["Mínimo de Orden por SKU"]) * r["Mínimo de Orden por SKU"]),
             axis=1
         )
         df_calc["ceil"] = df_calc.apply(
-            lambda r: apply_moq(r["qty_needed"], r["Mínimo de Orden por SKU"]),
+            lambda r: ceil_moq(r["qty_needed"], r["Mínimo de Orden por SKU"]),
             axis=1
         )
-        # Ajuste para cumplir MOQ global con overshoot mínimo (subset-sum)
+
+        # Subset-sum DP para cumplir MOQ global con mínimo overshoot
         if min_order_global > 0:
             floor_sum = int(df_calc["floor"].sum())
             if floor_sum >= min_order_global:
@@ -114,38 +118,31 @@ if uploaded_file:
             else:
                 diff = min_order_global - floor_sum
                 deltas = (df_calc["ceil"] - df_calc["floor"]).astype(int).tolist()
-                # Programación dinámica subset-sum
                 dp = {0: []}
                 for i, d in enumerate(deltas):
                     if d <= 0:
                         continue
-                    new_dp = dp.copy()
-                    for s, idxs in dp.items():
+                    for s, idxs in list(dp.items()):
                         new_s = s + d
-                        if new_s not in new_dp:
-                            new_dp[new_s] = idxs + [i]
-                    dp = new_dp
-                # Encontrar suma mínima >= diff
+                        if new_s not in dp:
+                            dp[new_s] = idxs + [i]
                 candidates = [s for s in dp.keys() if s >= diff]
                 if candidates:
                     best = min(candidates)
                     pick = dp[best]
-                    orders = []
-                    for idx in range(len(df_calc)):
-                        if idx in pick:
-                            orders.append(int(df_calc.at[idx, "ceil"]))
-                        else:
-                            orders.append(int(df_calc.at[idx, "floor"]))
+                    df_calc["Orden Sugerida en Bultos"] = [
+                        int(df_calc.at[i, "ceil"]) if i in pick else int(df_calc.at[i, "floor"]
+                    ) for i in range(len(df_calc))]
                 else:
-                    # No hay combinación, usar ceil para todos
-                    orders = df_calc["ceil"].astype(int).tolist()
-                df_calc["Orden Sugerida en Bultos"] = orders
+                    df_calc["Orden Sugerida en Bultos"] = df_calc["ceil"].astype(int)
         else:
-            df_calc["Orden Sugerida en Bultos"] = df_calc["ceil"]
-        # Mostrar resultados finales
+            df_calc["Orden Sugerida en Bultos"] = df_calc["ceil"].astype(int)
+
+        # Mostrar resultados
         st.subheader("✅ Orden Sugerida por SKU")
         st.dataframe(df_calc[["SKU", "Orden Sugerida en Bultos"]])
-        # Descarga CSV de salida
+
+        # Descargar CSV de salida
         csv_out = df_calc[["SKU", "Orden Sugerida en Bultos"]].to_csv(index=False)
         st.download_button(
             label="Descargar Orden Sugerida (CSV)",
@@ -154,4 +151,4 @@ if uploaded_file:
             mime="text/csv"
         )
 else:
-    st.info("Por favor, sube un CSV con las columnas requeridas para generar la orden.")
+    st.info("Por favor, sube un archivo CSV con las columnas requeridas para generar la orden.")
